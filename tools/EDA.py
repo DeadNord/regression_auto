@@ -176,7 +176,7 @@ class EDA:
                         plt.ylabel(col_j)
                         plt.show()
 
-    def calculate_mutual_information(self, target, plot=False):
+    def calculate_mutual_information(self, target, discrete_features, plot=False):
         """
         Calculates mutual information between all features and the specified target column. Optionally plots the results.
 
@@ -184,17 +184,32 @@ class EDA:
         ----------
         target : str
             The target column to calculate mutual information against.
+        discrete_features : list
+            List of features to be considered as discrete.
         plot : bool, optional
             Whether to plot the mutual information scores (default is False).
         """
         if target not in self.df.columns:
             raise ValueError(f"Target column '{target}' not found in DataFrame.")
 
-        numeric_columns = self.df.select_dtypes(include=["int64", "float64"]).columns
-        features = self.df[numeric_columns].drop(columns=[target], errors="ignore")
+        features = self.df.drop(columns=[target], errors="ignore")
         target_values = self.df[target]
 
-        mi = mutual_info_regression(features, target_values)
+        # Convert categorical features to numerical
+        for col in features.columns:
+            if features[col].dtype == "object" or col in discrete_features:
+                features[col], _ = features[col].factorize()
+
+        # Calculate mutual information
+        mi = mutual_info_regression(
+            features,
+            target_values,
+            discrete_features=[
+                features.columns.get_loc(c)
+                for c in discrete_features
+                if c in features.columns
+            ],
+        )
         mi_series = pd.Series(mi, index=features.columns, name="Mutual Information")
         mi_series = mi_series.sort_values(ascending=True)
 
@@ -284,13 +299,51 @@ class EDA:
             y="Feature",
             hue="variable",
             kind="bar",
-            height=8,
+            height=6,
             aspect=1.5,
         )
 
         plt.title("Mutual Information and Feature Importance")
         plt.xlabel("Importance Rank")
         plt.ylabel("Feature")
+        plt.tight_layout()
+        plt.show()
+
+    def plot_mi_gb_matrix(self, importance_df):
+        """
+        Plots a matrix categorizing features into four blocks based on their Mutual Information (MI) and Gradient Boosting (GB) scores.
+
+        Parameters
+        ----------
+        importance_df : pd.DataFrame
+            DataFrame containing mutual information and feature importance values.
+        """
+        high_mi = importance_df["MutualInfoRank"] > 0.5
+        high_gb = importance_df["FeatureImportanceRank"] > 0.5
+
+        matrix_data = {
+            "High MI & High GB": importance_df[high_mi & high_gb],
+            "High MI & Low GB": importance_df[high_mi & ~high_gb],
+            "Low MI & High GB": importance_df[~high_mi & high_gb],
+            "Low MI & Low GB": importance_df[~high_mi & ~high_gb],
+        }
+
+        fig, axes = plt.subplots(2, 2, figsize=(15, 10))
+
+        for ax, (title, data) in zip(axes.flatten(), matrix_data.items()):
+            sns.barplot(
+                x="FeatureImportanceRank",
+                y="Feature",
+                data=data,
+                ax=ax,
+                palette="viridis",
+            )
+            ax.set_title(title, fontsize=16)
+            ax.set_xlim(0, 1)
+            ax.set_xlabel("Feature Importance Rank", fontsize=14)
+            ax.set_ylabel("Feature", fontsize=14)
+            ax.tick_params(axis="both", which="major", labelsize=16)
+
         plt.tight_layout()
         plt.show()
 
